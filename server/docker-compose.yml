@@ -1,0 +1,18 @@
+services:
+  heartcheck:
+    build: .
+    container_name: heartcheck
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./data:/data            # AuthKey.p8 를 여기에 넣기
+    environment:
+      VIEW_KEY: "여기에_확인용_긴_랜덤문자열"       # 사이트 주소에 ?k= 로 붙여서 공유
+      DEVICE_KEY: "여기에_앱용_긴_랜덤문자열"       # Shared/Config.swift 의 deviceKey 와 같게
+      SESSION_MINUTES: "5"
+      APNS_TEAM_ID: "XXXXXXXXXX"                   # 애플 개발자 Team ID
+      APNS_KEY_ID: "YYYYYYYYYY"                    # APNs 키 ID
+      APNS_KEY_FILE: "/data/AuthKey.p8"
+      APNS_TOPIC: "com.kuroart.heartcheck"         # 아이폰 앱 번들 ID
+      APNS_SANDBOX: "1"                            # Xcode 직접 설치=1, TestFlight=0

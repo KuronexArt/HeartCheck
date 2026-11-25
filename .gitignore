@@ -1,0 +1,16 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+*.ipa
+*.dSYM*
+.swiftpm/
+# 서버 데이터 / 키
+server/data/*
+!server/data/.gitkeep
+*.p8
+.env
+node_modules/
+.DS_Store

@@ -1,0 +1,61 @@
+# XcodeGen 설정 — `brew install xcodegen && xcodegen` 으로 HeartCheck.xcodeproj 생성
+name: HeartCheck
+options:
+  bundleIdPrefix: com.kuroart
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""        # ← 본인 Team ID 입력 (또는 Xcode에서 선택)
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  HeartCheck:
+    type: application
+    platform: iOS
+    sources: [iOS, Shared]
+    dependencies:
+      - target: HeartCheckWatch
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: HeartCheck
+        UILaunchScreen: {}
+        UIBackgroundModes: [remote-notification]
+        NSHealthShareUsageDescription: 워치로 잰 심박수를 읽어 확인 페이지로 보내기 위해 필요해요.
+        NSHealthUpdateUsageDescription: 심박 측정용 운동 세션을 시작하기 위해 필요해요. (기록은 저장하지 않아요)
+    entitlements:
+      path: iOS/HeartCheck.entitlements
+      properties:
+        aps-environment: development
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kuroart.heartcheck
+
+  HeartCheckWatch:
+    type: application
+    platform: watchOS
+    sources: [Watch, Shared]
+    info:
+      path: Watch/Info.plist
+      properties:
+        CFBundleDisplayName: HeartCheck
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.kuroart.heartcheck
+        WKBackgroundModes: [workout-processing]
+        NSHealthShareUsageDescription: 심박수를 실시간으로 측정해 확인 페이지로 보내기 위해 필요해요.
+        NSHealthUpdateUsageDescription: 심박 측정용 운동 세션을 시작하기 위해 필요해요. (기록은 저장하지 않아요)
+    entitlements:
+      path: Watch/HeartCheckWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kuroart.heartcheck.watchkitapp
