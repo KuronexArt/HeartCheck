@@ -89,8 +89,9 @@ final class WorkoutManager: NSObject, ObservableObject {
         if now.timeIntervalSince(startedAt) > Double(Config.hardLimitMinutes) * 60, mode == .onDemand { stop(); return }
         if mode == .onDemand, now > deadline { stop(); return }
 
-        // 전송 간격: 보고 있으면 2초, 밤새 모드에서 아무도 안 보면 60초
-        let interval: TimeInterval = (mode == .overnight && !watching) ? 60 : 2
+        // 전송 간격: 보고 있으면 2초, 밤새 모드에서 아무도 안 보면 15초
+        // (버튼 누른 뒤 실시간으로 바뀌기까지 최대 15초)
+        let interval: TimeInterval = (mode == .overnight && !watching) ? 15 : 2
         guard !sending, now.timeIntervalSince(lastSent) >= interval else { return }
         sending = true
         lastSent = now

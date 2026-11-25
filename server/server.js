@@ -55,7 +55,7 @@ function snapshot() {
   return {
     phase: state.phase, phaseDetail: state.phaseDetail, phaseAt: state.phaseAt,
     lastHr: state.lastHr, keepUntil: state.keepUntil,
-    deviceRegistered: !!state.deviceToken, now: Date.now(),
+    deviceRegistered: !!state.deviceToken, watchOnline: watchOnline(), now: Date.now(),
   };
 }
 function broadcast(type, data) {
@@ -69,6 +69,9 @@ function setPhase(phase, detail = '') {
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 20000);
 
 // 지금 보고 있는 사람이 있는지 (밤새 모드에서 워치 전송 간격 조절용)
+// 워치가 최근 2분 안에 심박을 보냈으면 '밤새 모드로 대기 중'
+const ONLINE_MS = 120000;
+const watchOnline = () => !!state.lastHr && Date.now() - state.lastHr.ts < ONLINE_MS;
 const watching = () => clients.size > 0 || Date.now() < state.keepUntil;
 
 // ---------- APNs ----------
@@ -151,8 +154,9 @@ const server = http.createServer(async (req, res) => {
     state.keepUntil = now + SESSION_MIN * 60 * 1000;
     state.lastRequestAt = now;
     broadcast('status', snapshot());
-    // 이미 측정 중이면 푸시 없이 시간만 연장
-    if (state.lastHr && now - state.lastHr.ts < 20000) return json(res, 200, { ok: true, extended: true });
+    // 워치가 밤새 모드로 켜져 있으면 푸시 없이 바로 실시간 전환 (다음 전송 때 watching=true 받음)
+    if (watchOnline()) return json(res, 200, { ok: true, extended: true });
+    // 아래 푸시 경로는 아이폰 앱이 화면에 떠 있을 때만 성공함 (iOS 제한: 백그라운드에선 startWatchApp 불가)
     if (!state.deviceToken) { setPhase('error', '아이폰 앱이 아직 등록되지 않았어요'); return json(res, 409, { error: 'no device' }); }
     setPhase('requested');
     const r = await sendSilentPush(state.deviceToken);

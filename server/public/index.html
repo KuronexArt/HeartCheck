@@ -43,7 +43,7 @@
   </div>
   <button id="go">지금 심박 확인하기</button>
   <button id="stop" hidden>측정 그만하기</button>
-  <p class="hint" id="hint">버튼을 누르면 워치가 몇 분 동안 심박을 재서 실시간으로 보여줘요.</p>
+  <p class="hint" id="hint">버튼을 누르면 몇 초 안에 실시간 심박으로 바뀌어요. (워치에서 밤새 모드가 켜져 있어야 해요)</p>
 
 <script>
 const params = new URLSearchParams(location.search);
@@ -60,6 +60,8 @@ const PHASE = {
   phone_woke: ['warn', '워치 측정 시작하는 중…'],
   measuring:  ['ok', '실시간 측정 중'],
   ended:      ['', '측정 끝'],
+  standby:    ['ok', '워치 대기 중 · 버튼 누르면 실시간'],
+  offline:    ['', '워치 밤새 모드가 꺼져 있어요'],
   error:      ['err', '문제가 생겼어요'],
 };
 
@@ -74,11 +76,14 @@ function render() {
   $('ago').textContent = hr ? agoText(now - hr.ts) : '';
 
   let phase = st.phase || 'idle';
-  if (phase === 'measuring' && !fresh) phase = 'ended';
+  const online = hr && now - hr.ts < 120000;
+  if (phase === 'measuring' && !fresh) phase = online ? 'standby' : 'offline';
+  if ((phase === 'idle' || phase === 'ended') && !online) phase = 'offline';
+  if (phase === 'ended' && online) phase = 'standby';
   // 요청 후 40초 지나도 응답 없으면 안내
   if ((phase === 'requested' || phase === 'phone_woke') && now - st.phaseAt > 40000) {
     $('dot').className = 'dot err';
-    $('status').textContent = phase === 'requested' ? '아이폰이 응답하지 않아요' : '워치가 응답하지 않아요';
+    $('status').textContent = '워치 밤새 모드가 꺼져 있어요 — 워치에서 켜주세요';
   } else {
     const [cls, label] = PHASE[phase] || PHASE.idle;
     $('dot').className = 'dot ' + cls;
