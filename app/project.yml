@@ -34,6 +34,7 @@ targets:
         aps-environment: development
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
+    scheme: {}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kuroart.heartcheck
@@ -56,6 +57,7 @@ targets:
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
+    scheme: {}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kuroart.heartcheck.watchkitapp
