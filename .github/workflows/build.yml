@@ -1,10 +1,13 @@
-name: Build
+name: Build unsigned IPA
 
 on:
   push:
     branches: [main]
     paths: ['app/**', '.github/workflows/build.yml']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -19,17 +22,34 @@ jobs:
       - name: Generate project
         working-directory: app
         run: xcodegen
-      - name: Build watchOS app
-        working-directory: app
-        run: |
-          set -o pipefail
-          xcodebuild -project HeartCheck.xcodeproj -scheme HeartCheckWatch \
-            -destination 'generic/platform=watchOS' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -n 80
-      - name: Build iOS app (embeds watch app)
+      - name: Build (iOS app + embedded watch app)
         working-directory: app
         run: |
           set -o pipefail
           xcodebuild -project HeartCheck.xcodeproj -scheme HeartCheck \
+            -configuration Release \
             -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -n 80
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | grep -E "error:|warning: .*\.swift|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/HeartCheck.app
+      - name: Package IPA
+        working-directory: app
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/HeartCheck.app Payload/
+          ls Payload/HeartCheck.app/Watch || echo "warning: watch app not embedded"
+          zip -qry HeartCheck-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HeartCheck-unsigned-ipa
+          path: app/HeartCheck-unsigned.ipa
+      - name: Publish to latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest app/HeartCheck-unsigned.ipa \
+            --title "HeartCheck (latest build)" \
+            --notes "Commit ${GITHUB_SHA::7} — 서명 안 된 IPA. Sideloadly 등으로 설치." \
+            --target "$GITHUB_SHA"
