@@ -21,6 +21,7 @@ struct WatchView: View {
     @EnvironmentObject var wm: WorkoutManager
 
     var body: some View {
+        ScrollView {
         VStack(spacing: 8) {
             Image(systemName: "heart.fill").foregroundStyle(.pink)
             Text(wm.bpm.map { "\($0)" } ?? "--")
@@ -33,6 +34,15 @@ struct WatchView: View {
                 Button("밤새 모드 시작") { wm.start(mode: .overnight) }
                     .tint(.indigo)
             }
+            // 진단 정보
+            Text(wm.authText).font(.caption2).foregroundStyle(.secondary)
+            if !wm.lastError.isEmpty {
+                Text(wm.lastError).font(.caption2).foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+            Button("권한 다시 요청") { wm.requestAuthorization() }
+                .font(.footnote)
+        }
         }
         .onAppear { wm.requestAuthorization() }
     }

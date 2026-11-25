@@ -13,6 +13,8 @@ final class WorkoutManager: NSObject, ObservableObject {
     @Published private(set) var bpm: Int?
     @Published private(set) var isRunning = false
     @Published private(set) var statusText = "대기 중"
+    @Published private(set) var lastError = ""        // 진단용: 마지막 오류를 화면에 표시
+    @Published private(set) var authText = "권한 확인 중"
 
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
@@ -23,12 +25,33 @@ final class WorkoutManager: NSObject, ObservableObject {
     private var lastSent = Date.distantPast
     private var watching = true            // 서버 응답: 누가 보고 있는지
     private var sending = false
+    private var userStopped = false
 
     private let hrType = HKQuantityType(.heartRate)
     private let bpmUnit = HKUnit.count().unitDivided(by: .minute())
 
+    func refreshAuthStatus() {
+        guard HKHealthStore.isHealthDataAvailable() else { authText = "건강 데이터 사용 불가"; return }
+        switch store.authorizationStatus(for: HKObjectType.workoutType()) {
+        case .sharingAuthorized: authText = "운동 권한: 허용됨"
+        case .sharingDenied: authText = "운동 권한: 거부됨"
+        case .notDetermined: authText = "운동 권한: 아직 안 물어봄"
+        @unknown default: authText = "운동 권한: 알 수 없음"
+        }
+    }
+
     func requestAuthorization() {
-        store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hrType]) { _, _ in }
+        store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hrType]) { ok, err in
+            Task { @MainActor in
+                if let err { self.lastError = "권한 요청 오류: \(Self.describe(err))" }
+                self.refreshAuthStatus()
+            }
+        }
+    }
+
+    static func describe(_ error: Error) -> String {
+        let e = error as NSError
+        return "\(e.localizedDescription) [\(e.domain) \(e.code)]"
     }
 
     func start(mode: Mode, configuration: HKWorkoutConfiguration? = nil) {
@@ -56,18 +79,29 @@ final class WorkoutManager: NSObject, ObservableObject {
             watching = true
             let now = Date()
             s.startActivity(with: now)
-            b.beginCollection(withStart: now) { _, _ in }
+            b.beginCollection(withStart: now) { ok, err in
+                if let err {
+                    Task { @MainActor in
+                        self.lastError = "수집 시작 오류: \(Self.describe(err))"
+                        Api.event("error", self.lastError)
+                    }
+                }
+            }
+            lastError = ""
+            userStopped = false
             isRunning = true
             statusText = mode == .overnight ? "밤새 모드" : "측정 중"
             Api.event("watch_started", mode == .overnight ? "overnight" : "onDemand")
         } catch {
             statusText = "시작 실패"
-            Api.event("error", "워치 세션 시작 실패: \(error.localizedDescription)")
+            lastError = "세션 생성 오류: \(Self.describe(error))"
+            Api.event("error", lastError)
         }
     }
 
     func stop() {
         guard let session else { return }
+        userStopped = true
         session.end()   // → didChangeTo .ended 에서 정리
     }
 
@@ -113,14 +147,20 @@ final class WorkoutManager: NSObject, ObservableObject {
 extension WorkoutManager: HKWorkoutSessionDelegate {
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState,
                                     from fromState: HKWorkoutSessionState, date: Date) {
-        if toState == .ended {
-            Task { @MainActor in self.cleanup(endDate: date) }
+        Task { @MainActor in
+            if toState == .ended {
+                if !self.userStopped, self.lastError.isEmpty {
+                    self.lastError = "세션이 저절로 끝남 (이전 상태 \(fromState.rawValue), \(Int(Date().timeIntervalSince(self.startedAt)))초 만에)"
+                }
+                self.cleanup(endDate: date)
+            }
         }
     }
 
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
         Task { @MainActor in
-            Api.event("error", "워치 세션 오류: \(error.localizedDescription)")
+            self.lastError = "세션 오류: \(Self.describe(error))"
+            Api.event("error", self.lastError)
             self.cleanup(endDate: Date())
         }
     }

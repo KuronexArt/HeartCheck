@@ -66,7 +66,12 @@ struct ContentView: View {
                     Button("건강 권한 요청") { requestAuth() }
                     Button("워치 측정 테스트") {
                         AppDelegate.launchWatch { ok, err in
-                            DispatchQueue.main.async { log = ok ? "워치 실행 요청 성공" : "실패: \(err?.localizedDescription ?? "")" }
+                            DispatchQueue.main.async {
+                                if ok { log = "워치 실행 요청 성공" }
+                                else if let e = err as NSError? { log = "실패: \(e.localizedDescription) [\(e.domain) \(e.code)]" }
+                                else { log = "실패: 알 수 없음" }
+                                log += "\n" + authStatusText()
+                            }
                         }
                     }
                     Button("서버에 다시 등록") {
@@ -82,10 +87,22 @@ struct ContentView: View {
         }
     }
 
+    private func authStatusText() -> String {
+        switch AppDelegate.healthStore.authorizationStatus(for: HKObjectType.workoutType()) {
+        case .sharingAuthorized: return "아이폰 운동 권한: 허용됨"
+        case .sharingDenied: return "아이폰 운동 권한: 거부됨"
+        case .notDetermined: return "아이폰 운동 권한: 아직 안 물어봄"
+        @unknown default: return "아이폰 운동 권한: 알 수 없음"
+        }
+    }
+
     private func requestAuth() {
         let hr = HKQuantityType(.heartRate)
         AppDelegate.healthStore.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hr]) { ok, err in
-            DispatchQueue.main.async { log = ok ? "권한 요청 완료" : "권한 실패: \(err?.localizedDescription ?? "")" }
+            DispatchQueue.main.async {
+                log = ok ? "권한 요청 완료" : "권한 실패: \(err?.localizedDescription ?? "")"
+                log += "\n" + authStatusText()
+            }
         }
     }
 }
