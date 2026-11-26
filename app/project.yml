@@ -10,8 +10,8 @@ settings:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: ""        # ← 본인 Team ID 입력 (또는 Xcode에서 선택)
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "1.4"
-    CURRENT_PROJECT_VERSION: "5"
+    MARKETING_VERSION: "1.5"
+    CURRENT_PROJECT_VERSION: "6"
 
 targets:
   HeartCheck:
@@ -27,7 +27,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
-        UIBackgroundModes: [remote-notification]
+        UIBackgroundModes: [remote-notification, workout-processing]
+        WKBackgroundModes: [workout-processing]   # 워치가 아이폰 앱 ID로 인식될 때 대비
         NSHealthShareUsageDescription: 워치로 잰 심박수를 읽어 확인 페이지로 보내기 위해 필요해요.
         NSHealthUpdateUsageDescription: 심박 측정용 운동 세션을 시작하기 위해 필요해요. (기록은 저장하지 않아요)
     entitlements:
