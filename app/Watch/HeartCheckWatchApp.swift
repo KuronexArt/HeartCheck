@@ -42,6 +42,7 @@ final class HeartModel: NSObject, ObservableObject {
     private let hrType = HKQuantityType(.heartRate)
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
+    private var dataSource: HKLiveWorkoutDataSource?
     private var collectionStarted = false
     private var retries = 0
     private var lastHrAt = Date.distantPast
@@ -63,8 +64,10 @@ final class HeartModel: NSObject, ObservableObject {
             let s = try HKWorkoutSession(healthStore: store, configuration: config)
             let b = s.associatedWorkoutBuilder()
             let ds = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: config)
-            ds.enableCollection(for: hrType, predicate: nil)
+            // 대기: 수집 목록을 전부 비워서 센서가 꺼지는지 실험
+            for t in ds.typesToCollect { ds.disableCollection(for: t) }
             b.dataSource = ds
+            dataSource = ds
             s.delegate = self
             b.delegate = self
             session = s; builder = b; collectionStarted = false
@@ -83,12 +86,8 @@ final class HeartModel: NSObject, ObservableObject {
             b.beginCollection(withStart: date) { _, err in
                 Task { @MainActor in
                     if let err { self.note = "수집 오류 (\((err as NSError).code))" }
-                    // 요청이 없으면 바로 일시정지 → 센서 끔 (대기)
-                    if !self.sending { self.session?.pause() }
                 }
             }
-        } else if !sending {
-            session?.pause()
         }
     }
 
@@ -96,7 +95,7 @@ final class HeartModel: NSObject, ObservableObject {
         if let error { note = "세션 오류 (\((error as NSError).code))" }
         live = false; sensorOn = false; sending = false
         builder?.discardWorkout()
-        session = nil; builder = nil; collectionStarted = false
+        session = nil; builder = nil; dataSource = nil; collectionStarted = false
         // 대기는 '항상 켜짐' — 끊기면 자동 재시작 (최대 5회)
         guard retries < 5 else { return }
         retries += 1
@@ -104,8 +103,16 @@ final class HeartModel: NSObject, ObservableObject {
     }
 
     fileprivate func onHeartRate(_ v: Int) {
+        guard sending else { return }
         bpm = v
         lastHrAt = Date()
+    }
+
+    /// 요청 때만 심박 수집 목록에 넣음
+    private func setCollecting(_ on: Bool) {
+        guard let ds = dataSource else { return }
+        if on { ds.enableCollection(for: hrType, predicate: nil) }
+        else { for t in ds.typesToCollect { ds.disableCollection(for: t) } }
     }
 
     /// 서버와 통신: 대기 10초 / 실시간 2초 간격
@@ -122,7 +129,7 @@ final class HeartModel: NSObject, ObservableObject {
                 let want = r.watching ?? false
                 if want != sending {
                     sending = want
-                    if want { session?.resume() } else { session?.pause() }   // 센서 켜기/끄기
+                    setCollecting(want)   // 심박 수집 켜기/끄기
                 }
             } catch {
                 serverOK = false
@@ -159,7 +166,7 @@ struct HeartView: View {
             VStack(spacing: 4) {
                 Image(systemName: "heart.fill")
                     .foregroundStyle(m.sending ? Color.pink : Color.gray)
-                    .symbolEffect(.pulse, isActive: m.sensorOn)
+                    .symbolEffect(.pulse, isActive: m.sending)
                 Text(m.bpm.map(String.init) ?? "--")
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .monospacedDigit()
@@ -183,6 +190,6 @@ struct HeartView: View {
             let s = max(0, Int(k.timeIntervalSince(now)))
             return String(format: "실시간 전송 %d:%02d", s / 60, s % 60)
         }
-        return m.sensorOn ? "대기 중 · 센서 끄는 중" : "대기 중 · 센서 꺼짐"
+        return "대기 중 · 심박 수집 꺼둠"
     }
 }
