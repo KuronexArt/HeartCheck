@@ -1,6 +1,7 @@
 import SwiftUI
 import HealthKit
 import WatchConnectivity
+import AVFoundation
 
 @main
 struct HeartCheckApp: App {
@@ -47,6 +48,39 @@ final class WatchLink: NSObject, WCSessionDelegate {
     func sessionDidDeactivate(_ s: WCSession) { s.activate() }
 }
 
+/// 무음 오디오로 앱을 백그라운드에서 살려두기 (화면 안 켜도 대기)
+final class KeepAlive {
+    static let shared = KeepAlive()
+    private var player: AVAudioPlayer?
+    func start() {
+        guard player == nil else { return }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+            let p = try AVAudioPlayer(data: Self.silentWav())
+            p.numberOfLoops = -1
+            p.volume = 0
+            p.play()
+            player = p
+        } catch { }
+        NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
+            try? AVAudioSession.sharedInstance().setActive(true)
+            self?.player?.play()
+        }
+    }
+    /// 1초짜리 무음 WAV
+    static func silentWav() -> Data {
+        let rate: UInt32 = 8000, n: UInt32 = 8000
+        var d = Data()
+        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        d.append("RIFF".data(using: .ascii)!); u32(36 + n * 2); d.append("WAVE".data(using: .ascii)!)
+        d.append("fmt ".data(using: .ascii)!); u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16)
+        d.append("data".data(using: .ascii)!); u32(n * 2); d.append(Data(count: Int(n * 2)))
+        return d
+    }
+}
+
 /// 밤 모드: 아이폰이 화면을 켠 채 서버를 지켜보다가, 요청이 오면 워치 앱을 깨움
 @MainActor
 final class NightModel: ObservableObject {
@@ -57,11 +91,18 @@ final class NightModel: ObservableObject {
     private var loop: Task<Void, Never>?
     private var lastLaunch = Date.distantPast
 
+    /// 밤 화면 켜기/끄기 (대기 자체는 항상 돌아감)
     func toggle(_ v: Bool) {
         on = v
-        UIApplication.shared.isIdleTimerDisabled = v   // 화면 안 꺼지게
-        loop?.cancel(); loop = nil
-        if v { loop = Task { await run() } } else { line = "" }
+        UIApplication.shared.isIdleTimerDisabled = false
+        startWatching()
+    }
+
+    /// 앱이 살아 있는 동안 항상 서버 확인 (백그라운드 포함)
+    func startWatching() {
+        guard loop == nil, !Settings.serverURL.isEmpty else { return }
+        KeepAlive.shared.start()
+        loop = Task { await run() }
     }
 
     func launchWatch(reason: String) {
@@ -72,7 +113,8 @@ final class NightModel: ObservableObject {
         store.startWatchApp(with: c) { ok, err in
             Task { @MainActor in
                 let t = Date().formatted(date: .omitted, time: .standard)
-                if ok { self.lastResult = "\(t) 워치 깨움 성공 (\(reason))" }
+                let bg = UIApplication.shared.applicationState == .active ? "화면" : "백그라운드"
+                if ok { self.lastResult = "\(t) 워치 깨움 성공 (\(reason), \(bg))" }
                 else {
                     let e = err as NSError?
                     // 실패하면 메시지 방식으로라도 시도
@@ -116,7 +158,7 @@ struct ContentView: View {
             if night.on { NightScreen(night: night) } else { setup }
         }
         // 서버 설정이 있으면 앱을 열자마자 밤 모드로
-        .onAppear { if !Settings.serverURL.isEmpty && !night.on { night.toggle(true) } }
+        .onAppear { night.startWatching(); if !Settings.serverURL.isEmpty && !night.on { night.toggle(true) } }
         .onChange(of: phase) { _, p in
             if p == .active, !Settings.serverURL.isEmpty, !night.on { night.toggle(true) }
         }
