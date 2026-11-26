@@ -64,7 +64,7 @@ struct ContentView: View {
                 }
                 Section {
                     Button("건강 권한 요청") { requestAuth() }
-                    Button("워치 측정 테스트") {
+                    Button("워치 측정 테스트 (이 서명에선 안 됨)") {
                         AppDelegate.launchWatch { ok, err in
                             DispatchQueue.main.async {
                                 if ok { log = "워치 실행 요청 성공" }

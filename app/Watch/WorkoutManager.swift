@@ -104,9 +104,19 @@ final class WorkoutManager: NSObject, ObservableObject {
     }
 
     func stop() {
-        guard let session else { return }
+        guard let session else { isRunning = false; statusText = "대기 중"; return }
         userStopped = true
+        statusText = "중지 중…"
+        session.stopActivity(with: Date())
         session.end()   // → didChangeTo .ended 에서 정리
+        // 3초 안에 안 끝나면 강제로 정리
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if self.isRunning, self.session === session {
+                self.lastError = "세션이 응답하지 않아 강제 종료함"
+                self.cleanup(endDate: Date())
+            }
+        }
     }
 
     private func cleanup(endDate: Date) {
