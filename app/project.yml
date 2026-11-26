@@ -24,6 +24,8 @@ targets:
       path: iOS/Info.plist
       properties:
         CFBundleDisplayName: HeartCheck
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UIBackgroundModes: [remote-notification]
         NSHealthShareUsageDescription: 워치로 잰 심박수를 읽어 확인 페이지로 보내기 위해 필요해요.
@@ -47,6 +49,8 @@ targets:
       path: Watch/Info.plist
       properties:
         CFBundleDisplayName: HeartCheck
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.kuroart.heartcheck
         WKBackgroundModes: [workout-processing]

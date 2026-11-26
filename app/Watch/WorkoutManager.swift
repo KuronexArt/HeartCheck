@@ -93,7 +93,6 @@ final class WorkoutManager: NSObject, ObservableObject {
             // 세션이 running 상태가 되면 delegate에서 beginCollection 호출
             collectionStarted = false
             s.startActivity(with: Date())
-            lastError = ""
             userStopped = false
             isRunning = true
             statusText = mode == .overnight ? "밤새 모드" : "측정 중"
