@@ -236,12 +236,23 @@ struct HeartView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             VStack(spacing: 4) {
-                Image(systemName: "heart.fill")
-                    .foregroundStyle(m.measuring ? Color.pink : Color.gray)
-                    .symbolEffect(.pulse, isActive: m.measuring)
-                Text(m.bpm.map(String.init) ?? "--")
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .monospacedDigit()
+                if m.measuring {
+                    Text(ctx.date, format: .dateTime.hour().minute())
+                        .font(.system(size: 16, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                    Image(systemName: "heart.fill")
+                        .foregroundStyle(Color.pink)
+                        .symbolEffect(.pulse, isActive: true)
+                    Text(m.bpm.map(String.init) ?? "--")
+                        .font(.system(size: 52, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                } else {
+                    // 대기 중엔 시계처럼 보이게
+                    Text(ctx.date, format: .dateTime.hour().minute())
+                        .font(.system(size: 54, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(ctx.date, format: .dateTime.month().day().weekday())
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Text(status(ctx.date)).font(.footnote).foregroundStyle(m.measuring ? Color.green : Color.secondary)
                 if Settings.serverURL.isEmpty {
                     Text("아이폰 앱에서 서버 주소를 저장하세요").font(.caption2).foregroundStyle(.orange).multilineTextAlignment(.center)
@@ -263,7 +274,7 @@ struct HeartView: View {
         if !m.measuring {
             if m.standby, let u = m.standbyUntil {
                 let s = max(0, Int(u.timeIntervalSince(now)))
-                return String(format: "대기 중 · 센서 꺼짐 %d:%02d", s / 60, s % 60)
+                return String(format: "💤 대기 %d:%02d", s / 60, s % 60)
             }
             return "꺼짐 · 센서 꺼짐"
         }
