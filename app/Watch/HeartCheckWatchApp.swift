@@ -12,6 +12,9 @@ struct HeartCheckWatchApp: App {
 
 /// 아이폰이 startWatchApp으로 깨우면 여기로 들어옴 → 측정 시작
 final class WatchDelegate: NSObject, WKApplicationDelegate {
+    func handleActiveWorkoutRecovery() {
+        Task { @MainActor in HeartModel.shared.cleanupLeftover() }
+    }
     func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
         Task { @MainActor in HeartModel.shared.startRemote() }
     }
@@ -73,12 +76,28 @@ final class HeartModel: NSObject, ObservableObject {
 
     fileprivate func onRuntime(_ running: Bool, _ why: String) {
         standby = running
-        standbyUntil = running ? Date().addingTimeInterval(30 * 60) : nil
+        standbyUntil = running ? (standbyUntil ?? Date().addingTimeInterval(60 * 60)) : nil
         if !why.isEmpty { note = why }
     }
 
     func requestAuth() {
         store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hrType]) { _, _ in }
+        cleanupLeftover()
+    }
+
+    /// 예전 버전이 남긴 운동 세션이 살아 있으면 찾아서 끔 (초록불 계속 켜짐 방지)
+    func cleanupLeftover() {
+        guard session == nil else { return }
+        store.recoverActiveWorkoutSession { s, _ in
+            guard let s else { return }
+            Task { @MainActor in
+                if self.session == nil {
+                    s.delegate = self
+                    s.end()
+                    self.note = "남아 있던 측정 세션을 껐어요"
+                }
+            }
+        }
     }
 
     /// 직접 열었을 때 — 화면에 떠 있는 동안 측정
