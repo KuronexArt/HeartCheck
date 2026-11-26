@@ -26,6 +26,7 @@ final class WorkoutManager: NSObject, ObservableObject {
     private var watching = true            // 서버 응답: 누가 보고 있는지
     private var sending = false
     private var userStopped = false
+    private var collectionStarted = false
 
     private let hrType = HKQuantityType(.heartRate)
     private let bpmUnit = HKUnit.count().unitDivided(by: .minute())
@@ -87,16 +88,9 @@ final class WorkoutManager: NSObject, ObservableObject {
             let appState = WKApplication.shared().applicationState
             if appState != .active { lastError = "앱이 활성 상태가 아님(\(appState.rawValue))" }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            let now = Date()
-            s.startActivity(with: now)
-            b.beginCollection(withStart: now) { ok, err in
-                if let err {
-                    Task { @MainActor in
-                        self.lastError = "수집 시작 오류: \(Self.describe(err))"
-                        Api.event("error", self.lastError)
-                    }
-                }
-            }
+            // 세션이 running 상태가 되면 delegate에서 beginCollection 호출
+            collectionStarted = false
+            s.startActivity(with: Date())
             lastError = ""
             userStopped = false
             isRunning = true
@@ -159,6 +153,19 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
                                     from fromState: HKWorkoutSessionState, date: Date) {
         Task { @MainActor in
             self.statusText = "상태 \(fromState.rawValue)→\(toState.rawValue)"
+            if toState == .running, !self.collectionStarted, let b = self.builder {
+                self.collectionStarted = true
+                b.beginCollection(withStart: date) { ok, err in
+                    Task { @MainActor in
+                        if let err {
+                            self.lastError = "수집 시작 오류: \(Self.describe(err))"
+                            Api.event("error", self.lastError)
+                        } else {
+                            self.statusText = self.mode == .overnight ? "밤새 모드 측정 중" : "측정 중"
+                        }
+                    }
+                }
+            }
             if toState == .ended {
                 if !self.userStopped, self.lastError.isEmpty {
                     self.lastError = "세션이 저절로 끝남 (이전 상태 \(fromState.rawValue), \(Int(Date().timeIntervalSince(self.startedAt)))초 만에)"
