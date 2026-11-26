@@ -44,7 +44,7 @@ function safeEq(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
-const deviceReply = () => ({ ok: true, watching: active(), keepUntil: state.keepUntil });
+const deviceReply = () => ({ ok: true, watching: active(), keepUntil: state.keepUntil, lastHrTs: state.lastHr ? state.lastHr.ts : 0, now: now() });
 
 const PUBLIC = path.join(__dirname, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml' };

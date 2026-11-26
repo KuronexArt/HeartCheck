@@ -1,11 +1,20 @@
 import SwiftUI
 import HealthKit
+import WatchKit
 import WatchConnectivity
 
 @main
 struct HeartCheckWatchApp: App {
+    @WKApplicationDelegateAdaptor(WatchDelegate.self) var delegate
     init() { PhoneLink.shared.activate() }
     var body: some Scene { WindowGroup { HeartView() } }
+}
+
+/// 아이폰이 startWatchApp으로 깨우면 여기로 들어옴 → 측정 시작
+final class WatchDelegate: NSObject, WKApplicationDelegate {
+    func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
+        Task { @MainActor in HeartModel.shared.startRemote() }
+    }
 }
 
 // MARK: - 아이폰에서 서버 주소·키 받기
@@ -25,15 +34,14 @@ final class PhoneLink: NSObject, WCSessionDelegate {
     }
 }
 
-// MARK: - 심박 측정 + 서버 전송
-/// 앱을 열면 자동으로 '대기' — 센서를 켜두고 10초마다 서버에 생존 신호.
-/// 웹에서 [측정 시작]을 누르면 2초 간격으로 심박 전송, 5분 뒤 자동으로 대기 복귀.
+// MARK: - 측정
+/// 평소엔 꺼져 있음(센서 꺼짐). 아이폰이 깨우거나 직접 열면 측정 → 서버가 그만하라 하면 세션 종료(센서 꺼짐).
 @MainActor
 final class HeartModel: NSObject, ObservableObject {
+    static let shared = HeartModel()
+
     @Published var bpm: Int?
-    @Published var live = false          // 운동 세션 살아 있음 (대기 포함)
-    @Published var sensorOn = false      // 센서 켜짐 (세션 running)
-    @Published var sending = false       // 웹 요청으로 실시간 전송 중
+    @Published var measuring = false
     @Published var keepUntil: Date?
     @Published var serverOK: Bool?
     @Published var note = ""
@@ -42,20 +50,27 @@ final class HeartModel: NSObject, ObservableObject {
     private let hrType = HKQuantityType(.heartRate)
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
-    private var dataSource: HKLiveWorkoutDataSource?
     private var collectionStarted = false
-    private var retries = 0
     private var lastHrAt = Date.distantPast
     private var loop: Task<Void, Never>?
+    private var remote = false          // 아이폰이 깨운 측정인지
+    private var startedAt = Date()
 
-    func start() {
-        if loop == nil { loop = Task { await self.runLoop() } }
-        store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hrType]) { _, _ in
-            Task { @MainActor in self.startSession() }
-        }
+    func requestAuth() {
+        store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hrType]) { _, _ in }
+    }
+
+    /// 직접 열었을 때 — 화면에 떠 있는 동안 측정
+    func startLocal() { remote = false; startSession() }
+    /// 아이폰이 깨웠을 때 — 서버가 그만하라 할 때까지 측정
+    func startRemote() { remote = true; startSession() }
+
+    func stopIfIdle() {
+        if !remote { endSession() }
     }
 
     private func startSession() {
+        if loop == nil { loop = Task { await self.runLoop() } }
         guard session == nil else { return }
         let config = HKWorkoutConfiguration()
         config.activityType = .other
@@ -64,89 +79,78 @@ final class HeartModel: NSObject, ObservableObject {
             let s = try HKWorkoutSession(healthStore: store, configuration: config)
             let b = s.associatedWorkoutBuilder()
             let ds = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: config)
-            // 대기: 수집 목록을 전부 비워서 센서가 꺼지는지 실험
-            for t in ds.typesToCollect { ds.disableCollection(for: t) }
+            ds.enableCollection(for: hrType, predicate: nil)
             b.dataSource = ds
-            dataSource = ds
             s.delegate = self
             b.delegate = self
             session = s; builder = b; collectionStarted = false
+            startedAt = Date()
             s.startActivity(with: Date())
+            measuring = true
         } catch {
             note = "세션 시작 실패 (\((error as NSError).code))"
         }
     }
 
+    func endSession() {
+        session?.end()
+    }
+
     fileprivate func onState(_ to: HKWorkoutSessionState, _ date: Date) {
-        sensorOn = (to == .running)
-        guard to == .running else { return }
-        live = true; retries = 0; note = ""
-        if !collectionStarted, let b = builder {
+        if to == .running, !collectionStarted, let b = builder {
             collectionStarted = true
             b.beginCollection(withStart: date) { _, err in
-                Task { @MainActor in
-                    if let err { self.note = "수집 오류 (\((err as NSError).code))" }
-                }
+                if let err { Task { @MainActor in self.note = "수집 오류 (\((err as NSError).code))" } }
             }
+        }
+        if to == .ended {
+            builder?.discardWorkout()
+            session = nil; builder = nil; collectionStarted = false
+            measuring = false; remote = false
         }
     }
 
-    fileprivate func onEnded(_ error: Error?) {
-        if let error { note = "세션 오류 (\((error as NSError).code))" }
-        live = false; sensorOn = false; sending = false
-        builder?.discardWorkout()
-        session = nil; builder = nil; dataSource = nil; collectionStarted = false
-        // 대기는 '항상 켜짐' — 끊기면 자동 재시작 (최대 5회)
-        guard retries < 5 else { return }
-        retries += 1
-        Task { try? await Task.sleep(nanoseconds: 3_000_000_000); self.startSession() }
+    fileprivate func onFail(_ error: Error) {
+        note = "세션 오류 (\((error as NSError).code))"
+        session = nil; builder = nil; collectionStarted = false
+        measuring = false; remote = false
     }
 
     fileprivate func onHeartRate(_ v: Int) {
-        guard sending else { return }
         bpm = v
         lastHrAt = Date()
     }
 
-    /// 요청 때만 심박 수집 목록에 넣음
-    private func setCollecting(_ on: Bool) {
-        guard let ds = dataSource else { return }
-        if on { ds.enableCollection(for: hrType, predicate: nil) }
-        else { for t in ds.typesToCollect { ds.disableCollection(for: t) } }
-    }
-
-    /// 서버와 통신: 대기 10초 / 실시간 2초 간격
+    /// 측정 중일 때만 2초마다 서버로 전송
     private func runLoop() async {
         while !Task.isCancelled {
-            let fresh = Date().timeIntervalSince(lastHrAt) < 10
-            let path = (sending && fresh) ? "api/hr" : "api/ping"
-            var body: [String: Any] = ["ts": Date().timeIntervalSince1970 * 1000]
-            if let b = bpm, fresh { body["bpm"] = b }
-            do {
-                let r = try await Api.post(path, body)
-                serverOK = true
-                keepUntil = r.keepUntil.map { Date(timeIntervalSince1970: $0 / 1000) }
-                let want = r.watching ?? false
-                if want != sending {
-                    sending = want
-                    setCollecting(want)   // 심박 수집 켜기/끄기
+            if measuring {
+                let fresh = Date().timeIntervalSince(lastHrAt) < 10
+                var body: [String: Any] = ["ts": Date().timeIntervalSince1970 * 1000, "src": "watch"]
+                if let b = bpm, fresh { body["bpm"] = b }
+                do {
+                    let r = try await Api.post(fresh ? "api/hr" : "api/ping", body)
+                    serverOK = true
+                    keepUntil = r.keepUntil.map { Date(timeIntervalSince1970: $0 / 1000) }
+                    // 아이폰이 깨운 측정: 요청이 끝나면 세션 종료 → 센서 꺼짐
+                    if remote, r.watching == false, Date().timeIntervalSince(startedAt) > 15 { endSession() }
+                } catch {
+                    serverOK = false
                 }
-            } catch {
-                serverOK = false
+                // 안전장치: 원격 측정은 최대 6분
+                if remote, Date().timeIntervalSince(startedAt) > 360 { endSession() }
             }
-            try? await Task.sleep(nanoseconds: sending ? 2_000_000_000 : 10_000_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }
 }
 
 extension HeartModel: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
     nonisolated func workoutSession(_ s: HKWorkoutSession, didChangeTo to: HKWorkoutSessionState, from: HKWorkoutSessionState, date: Date) {
-        Task { @MainActor in
-            if to == .ended { self.onEnded(nil) } else { self.onState(to, date) }
-        }
+        Task { @MainActor in self.onState(to, date) }
     }
     nonisolated func workoutSession(_ s: HKWorkoutSession, didFailWithError error: Error) {
-        Task { @MainActor in self.onEnded(error) }
+        Task { @MainActor in self.onFail(error) }
     }
     nonisolated func workoutBuilderDidCollectEvent(_ b: HKLiveWorkoutBuilder) {}
     nonisolated func workoutBuilder(_ b: HKLiveWorkoutBuilder, didCollectDataOf types: Set<HKSampleType>) {
@@ -159,20 +163,19 @@ extension HeartModel: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
 
 // MARK: - 화면
 struct HeartView: View {
-    @StateObject private var m = HeartModel()
+    @ObservedObject private var m = HeartModel.shared
+    @Environment(\.scenePhase) private var phase
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
             VStack(spacing: 4) {
                 Image(systemName: "heart.fill")
-                    .foregroundStyle(m.sending ? Color.pink : Color.gray)
-                    .symbolEffect(.pulse, isActive: m.sending)
+                    .foregroundStyle(m.measuring ? Color.pink : Color.gray)
+                    .symbolEffect(.pulse, isActive: m.measuring)
                 Text(m.bpm.map(String.init) ?? "--")
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                Text(status(ctx.date))
-                    .font(.footnote)
-                    .foregroundStyle(m.sending ? Color.green : Color.secondary)
+                Text(status(ctx.date)).font(.footnote).foregroundStyle(m.measuring ? Color.green : Color.secondary)
                 if Settings.serverURL.isEmpty {
                     Text("아이폰 앱에서 서버 주소를 저장하세요").font(.caption2).foregroundStyle(.orange).multilineTextAlignment(.center)
                 } else if m.serverOK == false {
@@ -181,15 +184,19 @@ struct HeartView: View {
                 if !m.note.isEmpty { Text(m.note).font(.caption2).foregroundStyle(.red) }
             }
         }
-        .onAppear { m.start() }
+        .onAppear { m.requestAuth(); m.startLocal() }
+        .onChange(of: phase) { _, p in
+            if p == .active { m.startLocal() }
+            if p == .background { m.stopIfIdle() }
+        }
     }
 
     private func status(_ now: Date) -> String {
-        if !m.live { return "준비 중…" }
-        if m.sending, let k = m.keepUntil {
-            let s = max(0, Int(k.timeIntervalSince(now)))
+        if !m.measuring { return "꺼짐 · 센서 꺼짐" }
+        if let k = m.keepUntil, k > now {
+            let s = Int(k.timeIntervalSince(now))
             return String(format: "실시간 전송 %d:%02d", s / 60, s % 60)
         }
-        return "대기 중 · 심박 수집 꺼둠"
+        return "측정 중"
     }
 }

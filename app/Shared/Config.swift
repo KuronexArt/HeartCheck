@@ -14,7 +14,7 @@ enum Settings {
 }
 
 enum Api {
-    struct Reply: Decodable { let keepUntil: Double?; let watching: Bool? }
+    struct Reply: Decodable { let keepUntil: Double?; let watching: Bool?; var lastHrTs: Double? = nil; var now: Double? = nil }
 
     static func post(_ path: String, _ body: [String: Any] = [:]) async throws -> Reply {
         guard !Settings.serverURL.isEmpty, let base = URL(string: Settings.serverURL) else { throw URLError(.badURL) }
