@@ -27,6 +27,21 @@ final class WatchLink: NSObject, WCSessionDelegate {
         s.transferUserInfo(ctx)
         return "워치로 전달했어요"
     }
+
+    /// 워치에 측정 시작 명령 보내기 (startWatchApp 대신)
+    func sendStart() -> String {
+        let s = WCSession.default
+        guard s.activationState == .activated, s.isWatchAppInstalled else { return "워치 연결 안 됨" }
+        let cmd: [String: Any] = ["cmd": "start", "t": Date().timeIntervalSince1970]
+        var how: [String] = []
+        if s.isReachable { s.sendMessage(cmd, replyHandler: nil, errorHandler: nil); how.append("즉시") }
+        if s.isComplicationEnabled, s.remainingComplicationUserInfoTransfers > 0 {
+            s.transferCurrentComplicationUserInfo(cmd); how.append("컴플리케이션")
+        } else {
+            s.transferUserInfo(cmd); how.append("대기열")
+        }
+        return "측정 명령 보냄 (\(how.joined(separator: "+")))"
+    }
     func session(_ s: WCSession, activationDidCompleteWith st: WCSessionActivationState, error: Error?) { if !Settings.serverURL.isEmpty { push() } }
     func sessionDidBecomeInactive(_ s: WCSession) {}
     func sessionDidDeactivate(_ s: WCSession) { s.activate() }
@@ -51,16 +66,8 @@ final class NightModel: ObservableObject {
 
     func launchWatch(reason: String) {
         lastLaunch = Date()
-        let c = HKWorkoutConfiguration()
-        c.activityType = .other
-        c.locationType = .indoor
-        store.startWatchApp(with: c) { ok, err in
-            Task { @MainActor in
-                let t = Date().formatted(date: .omitted, time: .standard)
-                if ok { self.lastResult = "\(t) 워치 깨움 성공 (\(reason))" }
-                else if let e = err as NSError? { self.lastResult = "\(t) 실패: \(e.localizedDescription) [\(e.code)]" }
-            }
-        }
+        let t = Date().formatted(date: .omitted, time: .standard)
+        lastResult = "\(t) \(WatchLink.shared.sendStart()) (\(reason))"
     }
 
     private func run() async {

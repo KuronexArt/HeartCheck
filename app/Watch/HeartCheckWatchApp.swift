@@ -18,6 +18,17 @@ final class WatchDelegate: NSObject, WKApplicationDelegate {
     func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
         Task { @MainActor in HeartModel.shared.startRemote() }
     }
+    /// 아이폰이 보낸 메시지 때문에 시스템이 백그라운드로 깨워줄 때
+    func handle(_ backgroundTasks: Set<WKRefreshBackgroundTask>) {
+        for task in backgroundTasks {
+            if let t = task as? WKWatchConnectivityRefreshBackgroundTask {
+                PhoneLink.shared.activate()
+                PhoneLink.shared.hold(t)
+            } else {
+                task.setTaskCompletedWithSnapshot(false)
+            }
+        }
+    }
 }
 
 // MARK: - 아이폰에서 서버 주소·키 받기
@@ -28,12 +39,30 @@ final class PhoneLink: NSObject, WCSessionDelegate {
         WCSession.default.delegate = self
         WCSession.default.activate()
     }
+    private var pending: [WKWatchConnectivityRefreshBackgroundTask] = []
+    func hold(_ t: WKWatchConnectivityRefreshBackgroundTask) {
+        pending.append(t)
+        finishIfDone()
+    }
+    private func finishIfDone() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard !WCSession.default.hasContentPending else { self.finishIfDone(); return }
+            let ts = self.pending; self.pending = []
+            ts.forEach { $0.setTaskCompletedWithSnapshot(false) }
+        }
+    }
     func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) { apply(s.receivedApplicationContext) }
     func session(_ s: WCSession, didReceiveApplicationContext ctx: [String: Any]) { apply(ctx) }
     func session(_ s: WCSession, didReceiveUserInfo info: [String: Any] = [:]) { apply(info) }
+    func session(_ s: WCSession, didReceiveMessage m: [String: Any]) { apply(m) }
+    func session(_ s: WCSession, didReceiveMessage m: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) { apply(m); replyHandler(["ok": true]) }
     private func apply(_ d: [String: Any]) {
         if let u = d["serverURL"] as? String, !u.isEmpty { Settings.serverURL = u }
         if let k = d["deviceKey"] as? String, !k.isEmpty { Settings.deviceKey = k }
+        // 아이폰의 측정 시작 명령 (1분 이내 것만)
+        if d["cmd"] as? String == "start", let t = d["t"] as? Double, Date().timeIntervalSince1970 - t < 60 {
+            Task { @MainActor in HeartModel.shared.startRemote() }
+        }
     }
 }
 
@@ -65,6 +94,7 @@ final class HeartModel: NSObject, ObservableObject {
     private var runtime: WKExtendedRuntimeSession?
 
     func startStandby() {
+        return   // 5.0: 워치 대기 안 씀 (아이폰이 깨움)
         if let r = runtime, r.state == .running || r.state == .scheduled { return }
         let r = WKExtendedRuntimeSession()
         r.delegate = self
@@ -261,8 +291,8 @@ struct HeartView: View {
                     Text("서버 연결 안 됨").font(.caption2).foregroundStyle(.orange)
                 }
                 if !m.note.isEmpty { Text(m.note).font(.caption2).foregroundStyle(.red) }
-                if !m.standby && !m.measuring {
-                    Button("🌙 대기 다시 켜기") { m.startStandby() }.tint(.indigo)
+                if !m.measuring {
+                    Text("아이폰 밤 모드가 켜져 있으면\n웹 요청 때 자동으로 측정해요").font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 if m.measuring { Button("측정 끄기") { m.stopLocal() }.tint(.red) }
             }
@@ -273,7 +303,7 @@ struct HeartView: View {
 
     private func status(_ now: Date) -> String {
         if !m.measuring {
-            if m.standby, let u = m.standbyUntil {
+            if false, let u = m.standbyUntil {
                 let s = max(0, Int(u.timeIntervalSince(now)))
                 return String(format: "💤 대기 %d:%02d", s / 60, s % 60)
             }
