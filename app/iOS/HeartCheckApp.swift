@@ -108,10 +108,18 @@ struct ContentView: View {
     @State private var key = Settings.deviceKey
     @State private var log = ""
     @StateObject private var night = NightModel()
+    @Environment(\.scenePhase) private var phase
     private let store = HKHealthStore()
 
     var body: some View {
-        if night.on { NightScreen(night: night) } else { setup }
+        Group {
+            if night.on { NightScreen(night: night) } else { setup }
+        }
+        // 서버 설정이 있으면 앱을 열자마자 밤 모드로
+        .onAppear { if !Settings.serverURL.isEmpty && !night.on { night.toggle(true) } }
+        .onChange(of: phase) { _, p in
+            if p == .active, !Settings.serverURL.isEmpty, !night.on { night.toggle(true) }
+        }
     }
 
     private var setup: some View {
