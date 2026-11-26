@@ -1,63 +1,33 @@
-# HeartCheck — 버튼 누르면 워치 심박 실시간 확인
+# HeartCheck — 웹 버튼으로 애플워치 심박 실시간 확인
 
 ```
-[확인 페이지] 버튼 ──▶ [NAS 서버] ──APNs 무음 푸시──▶ [아이폰 앱]
-                                                      │ startWatchApp()
-      ▲ SSE 실시간                                    ▼
-      └──────────── /api/hr ◀── 심박(2초 간격) ── [워치 앱: 운동 세션]
+워치(HeartCheck 열어두기 = 대기) ──10초마다 생존 신호──▶ NAS 서버 ◀── Cloudflare 터널 ── 확인 페이지
+                                  ◀──[측정 시작] 응답──              (버튼 → 5분 실시간, 2초 간격)
 ```
 
-- 버튼 한 번에 **5분** 측정 (`SESSION_MINUTES`). 측정 중 다시 누르면 연장, "그만하기"로 바로 종료
-- 운동 기록은 저장하지 않고 버림 → 건강 앱/활동 링에 안 남음
-- 워치 앱의 **밤새 모드**: 자기 전에 직접 켜두면 푸시 없이 계속 측정. 아무도 안 보고 있을 땐 60초 간격으로만 전송
+## 동작
+- 워치에서 HeartCheck를 열면 **자동으로 대기** (버튼 없음). 센서를 켜두고 10초마다 서버에 신호.
+- 웹에서 **측정 시작** → 10초 안에 워치가 2초 간격 실시간 전송 → **5분 뒤 자동으로 대기 복귀**. **측정 중지**로 바로 종료.
+- 밤새 센서가 켜져 있어서 배터리를 씀 (하룻밤 30~50% 예상) — 자기 전 충전.
 
-## ⚠️ 사용 방식 (중요)
-iOS 제한으로 **아이폰 앱이 백그라운드일 때는 워치 앱을 실행시킬 수 없어요** (`startWatchApp`은 아이폰 앱이 화면에 떠 있을 때만 성공).
-그래서 기본 사용법은 **워치에서 자기 전에 "밤새 모드"를 켜두는 것**이에요.
-- 평소: 워치가 15초마다 심박 전송 (대기)
-- 사이트에서 버튼 누름 → 다음 전송 때 실시간(2초) 모드로 전환 → 5분 후 다시 대기
-- 푸시 경로는 아이폰 앱이 열려 있을 때만 동작하는 보조 기능
+## 서명 (중요)
+FlareStore 프로필 앱 ID(`app.lychee6613.pomelo9140`)에 맞춰 번들 ID가 고정돼 있음.
+- 아이폰 앱: `app.lychee6613`
+- 워치 앱: `app.lychee6613.pomelo9140` ← **서명 앱 ID와 정확히 같아야 함** (다르면 워치에서 HKError 14)
+인증서를 바꾸면 `app/project.yml`의 번들 ID를 그 프로필 앱 ID에 맞게 바꿀 것.
 
-## 필요한 것
-- **Apple Developer Program (유료, 연 $99)** — 푸시(APNs)와 HealthKit 실기기 배포에 필요
-- Mac + Xcode 16 이상, XcodeGen (`brew install xcodegen`)
-- 애플워치 (watchOS 10+), 아이폰 (iOS 17+)
+## NAS 설치 (Synology, SSH)
+```bash
+cd /volume1/docker
+curl -L https://github.com/KuronexArt/HeartCheck/archive/refs/heads/main.tar.gz -H "Authorization: token <GitHub 토큰>" | tar xz
+cp -r HeartCheck-main/server heartcheck && rm -rf HeartCheck-main && cd heartcheck
+vi docker-compose.yml          # VIEW_KEY, DEVICE_KEY 바꾸기
+sudo docker-compose up -d --build
+sudo docker logs HeartCheck_Tunnel 2>&1 | grep trycloudflare   # 접속 주소 확인
+```
+- 퀵 터널 주소는 **컨테이너 재시작 때마다 바뀜** → 바뀌면 아이폰 앱에 새 주소 저장(워치로 자동 전달)
 
-## 1. NAS 서버
-1. developer.apple.com → Certificates, IDs & Profiles → **Keys** → `+` → *Apple Push Notifications service* 체크 → `AuthKey_XXXX.p8` 다운로드
-2. `server/data/AuthKey.p8` 로 이름 바꿔 넣기
-3. `docker-compose.yml` 에서 `VIEW_KEY`, `DEVICE_KEY`(각각 긴 랜덤 문자열), `APNS_TEAM_ID`, `APNS_KEY_ID` 입력
-   - 랜덤 문자열: `openssl rand -hex 24`
-4. `docker compose up -d --build`
-5. 시놀로지 **제어판 → 로그인 포털 → 고급 → 역방향 프록시**로 `https://heart.내도메인` → `localhost:8787` 연결 + 인증서
-   - 워치/아이폰 앱은 HTTPS만 허용(ATS) → HTTPS 필수
-   - 역방향 프록시의 사용자 지정 헤더에 WebSocket 항목 추가 안 해도 됨 (SSE라 일반 HTTP로 동작)
-
-## 2. 앱
-1. `app/Shared/Config.swift` 에 서버 주소와 `DEVICE_KEY` 입력
-2. `cd app && xcodegen` → `HeartCheck.xcodeproj` 열기
-3. 두 타깃 모두 Signing & Capabilities에서 팀 선택 (Push Notifications, HealthKit, Background Modes가 이미 들어가 있음)
-4. 아이폰에 HeartCheck 스킴으로 실행 → 워치 앱도 같이 설치됨
-5. 아이폰 앱에서 **건강 권한 요청**, 워치에서도 앱 한 번 열어 권한 허용
-6. 아이폰 앱의 **워치 측정 테스트** → 확인 페이지에 심박이 뜨면 성공
-
-## 3. 확인 페이지 공유
-`https://heart.내도메인/?k=VIEW_KEY` 를 보내주면 됨. 한 번 열면 키는 기기에 저장되고 주소창에서는 지워져요.
-아이폰 사파리 → 공유 → **홈 화면에 추가** 하면 앱처럼 쓸 수 있어요.
-
-## 알아둘 점 (중요)
-- **무음 푸시는 애플이 지연·생략할 수 있어요.** 저전력 모드, 아이폰 앱 강제종료(앱 전환기에서 위로 밀기), 푸시를 너무 자주 보낸 경우에 잘 생겨요. 안 되면 페이지에 "아이폰이 응답하지 않아요"가 떠요.
-  → 자는 동안 꼭 확실해야 하면 **밤새 모드**를 쓰는 게 가장 안정적이에요 (대신 배터리 소모 큼, 기종에 따라 8시간에 30~50% 정도 예상 — 실측 필요).
-- `startWatchApp`은 워치를 **차고 있고 잠금 해제된 상태**여야 동작해요 (손목 감지로 자는 중엔 보통 유지됨).
-- TestFlight/배포 빌드는 `aps-environment`를 `production`으로, 서버 `APNS_SANDBOX`를 `0`으로 바꾸기.
-- 디버그: `docker logs heartcheck` 에 APNs 응답 코드가 찍혀요. `400 BadDeviceToken`이면 sandbox/production 불일치.
-
-## API
-| 경로 | 키 | 설명 |
-|---|---|---|
-| `POST /api/request` | VIEW | 측정 요청(푸시) / 측정 중이면 연장 |
-| `POST /api/stop` | VIEW | 측정 종료 지시 |
-| `GET /api/stream?k=` | VIEW | SSE: `status`, `history`, `hr` |
-| `POST /api/register` | DEVICE | 아이폰 푸시 토큰 등록 |
-| `POST /api/hr` | DEVICE | `{bpm, ts}` → `{keepUntil, watching}` |
-| `POST /api/event` | DEVICE | `phone_woke` / `watch_started` / `watch_ended` / `error` |
+## 앱 설정
+1. 아이폰 HeartCheck → 서버 주소(`https://xxxx.trycloudflare.com`) + DEVICE_KEY 입력 → **저장하고 워치로 보내기**
+2. 워치에서 HeartCheck 열기 → "대기 중" 확인
+3. 확인 페이지: `https://xxxx.trycloudflare.com/?k=VIEW_KEY`
