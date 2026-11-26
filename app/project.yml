@@ -10,8 +10,8 @@ settings:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: ""        # ← 본인 Team ID 입력 (또는 Xcode에서 선택)
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.0"
-    CURRENT_PROJECT_VERSION: "7"
+    MARKETING_VERSION: "2.1"
+    CURRENT_PROJECT_VERSION: "8"
 
 targets:
   HeartCheck:
@@ -55,6 +55,7 @@ targets:
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.kuroart.heartcheck
         WKBackgroundModes: [workout-processing]
+        UIBackgroundModes: [workout-processing]
         NSHealthShareUsageDescription: 심박수를 실시간으로 측정해 확인 페이지로 보내기 위해 필요해요.
         NSHealthUpdateUsageDescription: 심박 측정용 운동 세션을 시작하기 위해 필요해요. (기록은 저장하지 않아요)
     entitlements:
