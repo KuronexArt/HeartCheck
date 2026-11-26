@@ -164,10 +164,11 @@ final class HeartModel: NSObject, ObservableObject {
             b.delegate = self
             session = s; builder = b; collectionStarted = false
             startedAt = Date()
+            s.prepare()
             s.startActivity(with: Date())
             measuring = true
         } catch {
-            note = "세션 시작 실패 (\((error as NSError).code))"
+            note = "세션 시작 실패 \((error as NSError).code): \(error.localizedDescription)"
         }
     }
 
@@ -179,7 +180,7 @@ final class HeartModel: NSObject, ObservableObject {
         if to == .running, !collectionStarted, let b = builder {
             collectionStarted = true
             b.beginCollection(withStart: date) { _, err in
-                if let err { Task { @MainActor in self.note = "수집 오류 (\((err as NSError).code))" } }
+                if let err { Task { @MainActor in self.note = "수집 오류 \((err as NSError).code): \(err.localizedDescription)" } }
             }
         }
         if to == .ended {
@@ -190,10 +191,20 @@ final class HeartModel: NSObject, ObservableObject {
         }
     }
 
+    private var retried = false
     fileprivate func onFail(_ error: Error) {
-        note = "세션 오류 (\((error as NSError).code))"
+        let e = error as NSError
+        let st = WKApplication.shared().applicationState
+        let where_ = st == .active ? "화면" : (st == .inactive ? "비활성" : "백그라운드")
+        note = "세션 오류 \(e.domain.replacingOccurrences(of: "com.apple.", with: "")) \(e.code) [\(where_)]: \(e.localizedDescription)"
+        let wasRemote = remote
         session = nil; builder = nil; collectionStarted = false
         measuring = false; remote = false
+        // 한 번만 재시도 (prepare 후 시작)
+        if wasRemote && !retried {
+            retried = true
+            Task { try? await Task.sleep(nanoseconds: 2_000_000_000); self.startRemote() }
+        } else { retried = false }
     }
 
     fileprivate func onHeartRate(_ v: Int) {
