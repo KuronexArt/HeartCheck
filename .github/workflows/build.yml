@@ -39,6 +39,10 @@ jobs:
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/HeartCheck.app Payload/
           ls Payload/HeartCheck.app/Watch || echo "warning: watch app not embedded"
+          # 서명 도구(plumesign)가 필요한 권한(HealthKit)을 알 수 있게 권한만 넣어 임시 서명
+          codesign -f -s - --entitlements Watch/HeartCheckWatch.entitlements Payload/HeartCheck.app/Watch/HeartCheckWatch.app
+          codesign -f -s - --entitlements iOS/HeartCheck.entitlements Payload/HeartCheck.app
+          codesign -d --entitlements - Payload/HeartCheck.app/Watch/HeartCheckWatch.app | head -20
           zip -qry HeartCheck-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:

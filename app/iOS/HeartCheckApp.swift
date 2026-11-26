@@ -66,8 +66,20 @@ final class NightModel: ObservableObject {
 
     func launchWatch(reason: String) {
         lastLaunch = Date()
-        let t = Date().formatted(date: .omitted, time: .standard)
-        lastResult = "\(t) \(WatchLink.shared.sendStart()) (\(reason))"
+        let c = HKWorkoutConfiguration()
+        c.activityType = .other
+        c.locationType = .indoor
+        store.startWatchApp(with: c) { ok, err in
+            Task { @MainActor in
+                let t = Date().formatted(date: .omitted, time: .standard)
+                if ok { self.lastResult = "\(t) 워치 깨움 성공 (\(reason))" }
+                else {
+                    let e = err as NSError?
+                    // 실패하면 메시지 방식으로라도 시도
+                    self.lastResult = "\(t) 깨움 실패 [\(e?.code ?? -1)] \(e?.localizedDescription ?? "") → \(WatchLink.shared.sendStart())"
+                }
+            }
+        }
     }
 
     private func run() async {
