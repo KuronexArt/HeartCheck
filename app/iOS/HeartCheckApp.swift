@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// 아이폰에서 워치 앱을 백그라운드로 실행시키고 운동 세션 시작
     static func launchWatch(completion: @escaping (Bool, Error?) -> Void) {
         let config = HKWorkoutConfiguration()
-        config.activityType = .mindAndBody
+        config.activityType = .other
         config.locationType = .indoor
         healthStore.startWatchApp(with: config) { ok, err in completion(ok, err) }
     }

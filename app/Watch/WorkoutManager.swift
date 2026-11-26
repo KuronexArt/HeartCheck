@@ -67,14 +67,16 @@ final class WorkoutManager: NSObject, ObservableObject {
         }
         let config = configuration ?? {
             let c = HKWorkoutConfiguration()
-            c.activityType = .mindAndBody
+            c.activityType = .other
             c.locationType = .indoor
             return c
         }()
         do {
             let s = try HKWorkoutSession(healthStore: store, configuration: config)
             let b = s.associatedWorkoutBuilder()
-            b.dataSource = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: config)
+            let ds = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: config)
+            ds.enableCollection(for: HKQuantityType(.heartRate), predicate: nil)   // 심박 명시적 수집
+            b.dataSource = ds
             s.delegate = self
             b.delegate = self
             session = s; builder = b
@@ -131,6 +133,7 @@ final class WorkoutManager: NSObject, ObservableObject {
     // 새 심박이 들어올 때마다 호출
     private func handle(bpm value: Int) {
         bpm = value
+        statusText = (mode == .overnight ? "밤새 모드" : "측정 중") + " · 수신 중"
         let now = Date()
 
         // 종료 조건
