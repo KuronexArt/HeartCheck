@@ -69,7 +69,8 @@ final class HeartModel: NSObject, ObservableObject {
         let r = WKExtendedRuntimeSession()
         r.delegate = self
         runtime = r
-        r.start()
+        r.start(at: Date().addingTimeInterval(3))   // 스마트 알람은 예약 방식으로만 시작
+        note = "대기 예약함…"
         if loop == nil { loop = Task { await self.runLoop() } }
     }
     func stopStandby() { runtime?.invalidate() }
@@ -77,7 +78,7 @@ final class HeartModel: NSObject, ObservableObject {
     fileprivate func onRuntime(_ running: Bool, _ why: String) {
         let was = standby
         standby = running
-        standbyUntil = running ? (standbyUntil ?? Date().addingTimeInterval(60 * 60)) : nil
+        standbyUntil = running ? (standbyUntil ?? Date().addingTimeInterval(30 * 60)) : nil
         if !why.isEmpty { note = why }
         // 대기가 끝나면 바로 다시 켜기 시도 (밤새 유지)
         if !running && was {
@@ -217,7 +218,7 @@ extension HeartModel: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
 
 extension HeartModel: WKExtendedRuntimeSessionDelegate {
     nonisolated func extendedRuntimeSessionDidStart(_ s: WKExtendedRuntimeSession) {
-        Task { @MainActor in self.onRuntime(true, "") }
+        Task { @MainActor in self.onRuntime(true, ""); self.note = "" }
     }
     nonisolated func extendedRuntimeSessionWillExpire(_ s: WKExtendedRuntimeSession) {
         Task { @MainActor in self.onRuntime(true, "대기 곧 끝남") }
