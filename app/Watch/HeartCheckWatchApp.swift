@@ -75,9 +75,14 @@ final class HeartModel: NSObject, ObservableObject {
     func stopStandby() { runtime?.invalidate() }
 
     fileprivate func onRuntime(_ running: Bool, _ why: String) {
+        let was = standby
         standby = running
         standbyUntil = running ? (standbyUntil ?? Date().addingTimeInterval(60 * 60)) : nil
         if !why.isEmpty { note = why }
+        // 대기가 끝나면 바로 다시 켜기 시도 (밤새 유지)
+        if !running && was {
+            Task { try? await Task.sleep(nanoseconds: 2_000_000_000); self.startStandby() }
+        }
     }
 
     func requestAuth() {
@@ -149,6 +154,7 @@ final class HeartModel: NSObject, ObservableObject {
             builder?.discardWorkout()
             session = nil; builder = nil; collectionStarted = false
             measuring = false; remote = false
+            startStandby()   // 측정 끝나면 다시 대기
         }
     }
 
@@ -243,15 +249,14 @@ struct HeartView: View {
                     Text("서버 연결 안 됨").font(.caption2).foregroundStyle(.orange)
                 }
                 if !m.note.isEmpty { Text(m.note).font(.caption2).foregroundStyle(.red) }
-                if m.standby {
-                    Button("대기 끄기") { m.stopStandby() }.tint(.gray)
-                } else {
-                    Button("🌙 대기 시작") { m.startStandby() }.tint(.indigo)
+                if !m.standby && !m.measuring {
+                    Button("🌙 대기 다시 켜기") { m.startStandby() }.tint(.indigo)
                 }
                 if m.measuring { Button("측정 끄기") { m.stopLocal() }.tint(.red) }
             }
         }
-        .onAppear { m.requestAuth() }
+        .onAppear { m.requestAuth(); m.startStandby() }
+        .onChange(of: phase) { _, p in if p == .active { m.startStandby() } }
     }
 
     private func status(_ now: Date) -> String {
