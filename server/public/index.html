@@ -91,21 +91,31 @@ function drawSpark() {
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${(i / (pts.length - 1) * 300).toFixed(1)},${(66 - (p.bpm - lo) / (hi - lo) * 62).toFixed(1)}`).join('');
   $('spark').innerHTML = `<path d="${d}" fill="none" stroke="var(--heart)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
 }
-function connect() {
-  const es = new EventSource('/api/stream?k=' + encodeURIComponent(key));
-  es.addEventListener('status', e => { st = JSON.parse(e.data); skew = st.now - Date.now(); render(); });
-  es.addEventListener('history', e => { hist = JSON.parse(e.data); render(); });
-  es.addEventListener('hr', e => { const s = JSON.parse(e.data); hist.push(s); if (hist.length > 600) hist.shift(); st.lastHr = s; st.lastSeen = s.ts; render(); });
-  es.onerror = () => { $('dot').className = 'dot off'; $('status').textContent = '서버 연결 끊김 — 다시 연결 중…'; };
+let since = 0, failCount = 0;
+async function poll() {
+  try {
+    const r = await fetch(`/api/status?k=${encodeURIComponent(key)}&since=${since}`, { cache: 'no-store' });
+    if (r.status === 401) { localStorage.removeItem('hc_key'); $('status').textContent = '키가 틀렸어요 — 새로고침해서 다시 입력하세요'; return; }
+    const d = await r.json();
+    st = d.status; skew = st.now - Date.now();
+    if (since === 0) hist = d.hr; else hist.push(...d.hr);
+    if (hist.length > 600) hist = hist.slice(-600);
+    if (d.hr.length) since = d.hr[d.hr.length - 1].ts; else if (since === 0) since = 1;
+    failCount = 0;
+    render();
+  } catch {
+    if (++failCount >= 3) { $('dot').className = 'dot off'; $('status').textContent = '서버 연결 끊김 — 다시 연결 중…'; }
+  }
 }
+function connect() { poll(); setInterval(poll, 2000); }
 async function post(path) {
   const r = await fetch(path, { method: 'POST', headers: { 'x-key': key } });
   if (r.status === 401) { localStorage.removeItem('hc_key'); alert('키가 틀렸어요. 새로고침해서 다시 입력하세요.'); }
   if (r.status === 409) alert('워치가 대기 중이 아니에요. 워치에서 HeartCheck를 열어주세요.');
   return r;
 }
-$('go').onclick = async () => { pending = Date.now() + 3000; render(); await post('/api/request'); };
-$('stop').onclick = () => post('/api/stop');
+$('go').onclick = async () => { pending = Date.now() + 3000; render(); await post('/api/request'); poll(); };
+$('stop').onclick = async () => { await post('/api/stop'); poll(); };
 setInterval(render, 1000);
 connect();
 </script>

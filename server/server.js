@@ -55,7 +55,7 @@ http.createServer(async (req, res) => {
   const key = req.headers['x-key'] || url.searchParams.get('k') || '';
   const isViewer = safeEq(key, VIEW_KEY);
   const isDevice = safeEq(key, DEVICE_KEY);
-  if (p.startsWith('/api/') && p !== '/api/stream') {
+  if (p.startsWith('/api/') && p !== '/api/stream' && p !== '/api/status') {
     const who = isDevice ? 'device' : isViewer ? 'viewer' : `키틀림(${String(key).slice(0, 12) || '없음'})`;
     console.log(new Date().toISOString(), req.method, p, who, req.headers['user-agent'] || '');
   }
@@ -69,6 +69,13 @@ http.createServer(async (req, res) => {
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
+  }
+  // 폴링용: 상태 + since 이후 심박 (터널에서 SSE가 막혀도 동작)
+  if (p === '/api/status' && req.method === 'GET') {
+    if (!isViewer) return json(res, 401, { error: 'unauthorized' });
+    const since = Number(url.searchParams.get('since') || 0);
+    const hrs = since ? state.history.filter(h => h.ts > since) : state.history.slice(-150);
+    return json(res, 200, { status: snapshot(), hr: hrs });
   }
   if (p === '/api/request' && req.method === 'POST') {
     if (!isViewer) return json(res, 401, { error: 'unauthorized' });
