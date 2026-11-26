@@ -71,6 +71,7 @@ final class PhoneLink: NSObject, WCSessionDelegate {
 @MainActor
 final class HeartModel: NSObject, ObservableObject {
     static let shared = HeartModel()
+    static let noStandby = true
 
     @Published var bpm: Int?
     @Published var measuring = false
@@ -94,7 +95,7 @@ final class HeartModel: NSObject, ObservableObject {
     private var runtime: WKExtendedRuntimeSession?
 
     func startStandby() {
-        return   // 5.0: 워치 대기 안 씀 (아이폰이 깨움)
+        if Self.noStandby { return }   // 5.0: 워치 대기 안 씀 (아이폰이 깨움)
         if let r = runtime, r.state == .running || r.state == .scheduled { return }
         let r = WKExtendedRuntimeSession()
         r.delegate = self
