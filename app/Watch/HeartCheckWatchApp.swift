@@ -53,8 +53,29 @@ final class HeartModel: NSObject, ObservableObject {
     private var collectionStarted = false
     private var lastHrAt = Date.distantPast
     private var loop: Task<Void, Never>?
-    private var remote = false          // 아이폰이 깨운 측정인지
+    private var remote = false          // 아이폰/대기가 깨운 측정인지
     private var startedAt = Date()
+
+    // 스마트 알람 대기 (센서 꺼진 채 백그라운드에서 서버 확인)
+    @Published var standby = false
+    @Published var standbyUntil: Date?
+    private var runtime: WKExtendedRuntimeSession?
+
+    func startStandby() {
+        if let r = runtime, r.state == .running || r.state == .scheduled { return }
+        let r = WKExtendedRuntimeSession()
+        r.delegate = self
+        runtime = r
+        r.start()
+        if loop == nil { loop = Task { await self.runLoop() } }
+    }
+    func stopStandby() { runtime?.invalidate() }
+
+    fileprivate func onRuntime(_ running: Bool, _ why: String) {
+        standby = running
+        standbyUntil = running ? Date().addingTimeInterval(30 * 60) : nil
+        if !why.isEmpty { note = why }
+    }
 
     func requestAuth() {
         store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [hrType]) { _, _ in }
@@ -68,6 +89,8 @@ final class HeartModel: NSObject, ObservableObject {
     func stopIfIdle() {
         if !remote { endSession() }
     }
+    /// 화면에서 직접 측정 끄기
+    func stopLocal() { remote = false; endSession() }
 
     private func startSession() {
         if loop == nil { loop = Task { await self.runLoop() } }
@@ -124,7 +147,13 @@ final class HeartModel: NSObject, ObservableObject {
     /// 측정 중일 때만 2초마다 서버로 전송
     private func runLoop() async {
         while !Task.isCancelled {
-            if measuring {
+            if !measuring && standby {
+                do {
+                    let r = try await Api.post("api/ping", ["src": "watch-standby"])
+                    serverOK = true
+                    if r.watching == true { startRemote() }
+                } catch { serverOK = false }
+            } else if measuring {
                 let fresh = Date().timeIntervalSince(lastHrAt) < 10
                 var body: [String: Any] = ["ts": Date().timeIntervalSince1970 * 1000, "src": "watch"]
                 if let b = bpm, fresh { body["bpm"] = b }
@@ -140,7 +169,7 @@ final class HeartModel: NSObject, ObservableObject {
                 // 안전장치: 원격 측정은 최대 6분
                 if remote, Date().timeIntervalSince(startedAt) > 360 { endSession() }
             }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: measuring ? 2_000_000_000 : 3_000_000_000)
         }
     }
 }
@@ -158,6 +187,19 @@ extension HeartModel: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
         guard types.contains(hr), let q = b.statistics(for: hr)?.mostRecentQuantity() else { return }
         let v = Int(q.doubleValue(for: HKUnit.count().unitDivided(by: .minute())).rounded())
         Task { @MainActor in self.onHeartRate(v) }
+    }
+}
+
+extension HeartModel: WKExtendedRuntimeSessionDelegate {
+    nonisolated func extendedRuntimeSessionDidStart(_ s: WKExtendedRuntimeSession) {
+        Task { @MainActor in self.onRuntime(true, "") }
+    }
+    nonisolated func extendedRuntimeSessionWillExpire(_ s: WKExtendedRuntimeSession) {
+        Task { @MainActor in self.onRuntime(true, "대기 곧 끝남") }
+    }
+    nonisolated func extendedRuntimeSession(_ s: WKExtendedRuntimeSession, didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason, error: Error?) {
+        let code = (error as NSError?)?.code
+        Task { @MainActor in self.onRuntime(false, code != nil ? "대기 종료 (오류 \(code!))" : "대기 종료 (\(reason.rawValue))") }
     }
 }
 
@@ -182,17 +224,25 @@ struct HeartView: View {
                     Text("서버 연결 안 됨").font(.caption2).foregroundStyle(.orange)
                 }
                 if !m.note.isEmpty { Text(m.note).font(.caption2).foregroundStyle(.red) }
+                if m.standby {
+                    Button("대기 끄기") { m.stopStandby() }.tint(.gray)
+                } else {
+                    Button("🌙 대기 시작") { m.startStandby() }.tint(.indigo)
+                }
+                if m.measuring { Button("측정 끄기") { m.stopLocal() }.tint(.red) }
             }
         }
-        .onAppear { m.requestAuth(); m.startLocal() }
-        .onChange(of: phase) { _, p in
-            if p == .active { m.startLocal() }
-            if p == .background { m.stopIfIdle() }
-        }
+        .onAppear { m.requestAuth() }
     }
 
     private func status(_ now: Date) -> String {
-        if !m.measuring { return "꺼짐 · 센서 꺼짐" }
+        if !m.measuring {
+            if m.standby, let u = m.standbyUntil {
+                let s = max(0, Int(u.timeIntervalSince(now)))
+                return String(format: "대기 중 · 센서 꺼짐 %d:%02d", s / 60, s % 60)
+            }
+            return "꺼짐 · 센서 꺼짐"
+        }
         if let k = m.keepUntil, k > now {
             let s = Int(k.timeIntervalSince(now))
             return String(format: "실시간 전송 %d:%02d", s / 60, s % 60)
