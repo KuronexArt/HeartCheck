@@ -55,6 +55,10 @@ final class WorkoutManager: NSObject, ObservableObject {
     }
 
     func start(mode: Mode, configuration: HKWorkoutConfiguration? = nil) {
+        Task { await self.startAsync(mode: mode, configuration: configuration) }
+    }
+
+    private func startAsync(mode: Mode, configuration: HKWorkoutConfiguration?) async {
         // 이미 측정 중이면 시간만 연장
         if isRunning {
             if mode == .onDemand { deadline = max(deadline, Date().addingTimeInterval(Double(Config.defaultMinutes) * 60)) }
@@ -77,6 +81,12 @@ final class WorkoutManager: NSObject, ObservableObject {
             startedAt = Date()
             deadline = Date().addingTimeInterval(Double(Config.defaultMinutes) * 60)
             watching = true
+            // 애플 권장 순서: prepare → (준비 완료) → startActivity
+            s.prepare()
+            statusText = "준비 중"
+            let appState = WKApplication.shared().applicationState
+            if appState != .active { lastError = "앱이 활성 상태가 아님(\(appState.rawValue))" }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             let now = Date()
             s.startActivity(with: now)
             b.beginCollection(withStart: now) { ok, err in
@@ -148,6 +158,7 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState,
                                     from fromState: HKWorkoutSessionState, date: Date) {
         Task { @MainActor in
+            self.statusText = "상태 \(fromState.rawValue)→\(toState.rawValue)"
             if toState == .ended {
                 if !self.userStopped, self.lastError.isEmpty {
                     self.lastError = "세션이 저절로 끝남 (이전 상태 \(fromState.rawValue), \(Int(Date().timeIntervalSince(self.startedAt)))초 만에)"
