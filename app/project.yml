@@ -10,8 +10,8 @@ settings:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: ""        # ← 본인 Team ID 입력 (또는 Xcode에서 선택)
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.1"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "2.2"
+    CURRENT_PROJECT_VERSION: "9"
 
 targets:
   HeartCheck:
@@ -40,7 +40,7 @@ targets:
     scheme: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kuroart.heartcheck
+        PRODUCT_BUNDLE_IDENTIFIER: app.lychee6613   # 워치 ID의 앞부분
 
   HeartCheckWatch:
     type: application
@@ -53,7 +53,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         WKApplication: true
-        WKCompanionAppBundleIdentifier: com.kuroart.heartcheck
+        WKCompanionAppBundleIdentifier: app.lychee6613
         WKBackgroundModes: [workout-processing]
         UIBackgroundModes: [workout-processing]
         NSHealthShareUsageDescription: 심박수를 실시간으로 측정해 확인 페이지로 보내기 위해 필요해요.
@@ -66,4 +66,4 @@ targets:
     scheme: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kuroart.heartcheck.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: app.lychee6613.pomelo9140   # FlareStore 프로필 앱 ID와 정확히 같아야 함(아니면 HKError 14)
