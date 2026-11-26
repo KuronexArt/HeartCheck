@@ -1,0 +1,14 @@
+services:
+  refresher:
+    build: .
+    container_name: HeartCheck_Refresh
+    network_mode: host          # 아이폰을 와이파이(bonjour)로 찾기 위해 필요
+    restart: unless-stopped
+    environment:
+      IPHONE_UDID: "00008120-000175442140C01E"
+      IPHONE_IP: ""             # 못 찾으면 아이폰 와이파이 IP를 여기에 (예: 192.168.0.23)
+      REFRESH_HOUR: "4"
+    volumes:
+      - ./data:/data
+      - ./plume:/root/.config/PlumeImpactor
+      - ./pmd3:/root/.pymobiledevice3
