@@ -55,6 +55,10 @@ http.createServer(async (req, res) => {
   const key = req.headers['x-key'] || url.searchParams.get('k') || '';
   const isViewer = safeEq(key, VIEW_KEY);
   const isDevice = safeEq(key, DEVICE_KEY);
+  if (p.startsWith('/api/') && p !== '/api/stream') {
+    const who = isDevice ? 'device' : isViewer ? 'viewer' : `키틀림(${String(key).slice(0, 12) || '없음'})`;
+    console.log(new Date().toISOString(), req.method, p, who, req.headers['user-agent'] || '');
+  }
 
   // ----- 웹 페이지용 -----
   if (p === '/api/stream' && req.method === 'GET') {
