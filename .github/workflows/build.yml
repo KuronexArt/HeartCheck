@@ -39,6 +39,9 @@ jobs:
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/HeartCheck.app Payload/
           ls Payload/HeartCheck.app/Watch || echo "warning: watch app not embedded"
+          # 서명된 앱 ID(프로필 하나)와 맞추기: 워치의 짝 ID를 서명 ID로
+          /usr/libexec/PlistBuddy -c "Set :WKCompanionAppBundleIdentifier app.lychee6613.pomelo9140" Payload/HeartCheck.app/Watch/HeartCheckWatch.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :WKCompanionAppBundleIdentifier" Payload/HeartCheck.app/Watch/HeartCheckWatch.app/Info.plist
           zip -qry HeartCheck-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
